@@ -52,8 +52,11 @@ esp_err_t usbhost_openDevice()
 
     printf("USB speed: %s speed\n", (dev_info.speed == USB_SPEED_LOW) ? "Low" : "Full");
     printf("bConfigurationValue: %d\n", dev_info.bConfigurationValue);
+    printf("string desc manufacturer: ");
     usb_print_string_descriptor(dev_info.str_desc_manufacturer);
+    printf("string desc product:      ");
     usb_print_string_descriptor(dev_info.str_desc_product);
+    printf("string desc sn:           ");
     usb_print_string_descriptor(dev_info.str_desc_serial_num);
 
     // 读取设备描述符
@@ -108,9 +111,11 @@ esp_err_t usbhost_openDevice()
 
     // 判断设备类型是否为msc批量传输协议
     // check if device is MSC Bulk-Only
-    if (usbhost_driverObj.desc_interface->bInterfaceClass == 0x08 &&                                                                          // Mass Storage
-        ((usbhost_driverObj.desc_interface->bInterfaceSubClass == 0x06) || (usbhost_driverObj.desc_interface->bInterfaceSubClass == 0x02)) && // SCSI transparent command set or MMC-5
-        usbhost_driverObj.desc_interface->bInterfaceProtocol == 0x50)                                                                         // Bulk-Only Transport
+    if (usbhost_driverObj.desc_interface->bInterfaceClass == 0x08 && // Mass Storage
+        ((usbhost_driverObj.desc_interface->bInterfaceSubClass == 0x05) ||  // Obsolete SFF-8070I
+         (usbhost_driverObj.desc_interface->bInterfaceSubClass == 0x06) ||  // SCSI transparent command set
+         (usbhost_driverObj.desc_interface->bInterfaceSubClass == 0x02)) && // MMC-5
+        usbhost_driverObj.desc_interface->bInterfaceProtocol == 0x50)       // Bulk-Only Transport
     {
         printf("USB Mass Storage Class Bulk-Only device\n");
     }

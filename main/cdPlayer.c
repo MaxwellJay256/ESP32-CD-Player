@@ -58,7 +58,7 @@ bool cdplayer_discIsCd()
     uint32_t requireDatLen;
 
     // 判断cd-rom特性是否激活
-    // is cd driver in cd-rom mode
+    // is cd drive in cd-rom mode
     requireDatLen = 8;
     err = usbhost_scsi_getConfiguration(0x0000, 0x2, requireDat, &requireDatLen); // get Profile List Feature (0000h)
     if (err != ESP_OK)
@@ -202,7 +202,7 @@ esp_err_t cpplayer_getCdText(char **albumTitle, char **albumPerformer, char **ti
 
     //
     // 检查光驱能否读cd text
-    // check if cd driver can read cd text
+    // check if cd drive can read cd text
     //
     uint8_t requireDat[20];
     requireDatLen = 16;
@@ -443,7 +443,7 @@ void cdplayer_task_deviceAndDiscMonitor(void *arg)
         while (usbhost_driverObj.deviceIsOpened == 0)
         {
             vTaskDelay(pdMS_TO_TICKS(500));
-            printf("Wait for usb cd driver connect.\n");
+            printf("Wait for usb cd drive connect.\n");
         }
 
         // 检查是不是光驱
@@ -588,7 +588,7 @@ void cdplayer_task_deviceAndDiscMonitor(void *arg)
             }
             if (usbhost_driverObj.deviceIsOpened != 1)
             {
-                ESP_LOGI("cdplayer_task_deviceAndDiscMonitor", "CD driver disconnected");
+                ESP_LOGI("cdplayer_task_deviceAndDiscMonitor", "CD drive disconnected");
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -615,17 +615,20 @@ void cdplayer_task_playControl(void *arg)
         // eject disc
         if (btn_getPosedge(BTN_EJECT))
         {
-            ESP_LOGI("cdplayer_task_playControl", "Eject disc");
-            cdplayer_playerInfo.playing = 0;
-            esp_err_t err = usbhost_scsi_startStopUnit(true, false);
-            if (err != ESP_OK)
+            if (usbhost_driverObj.deviceIsOpened == 1)
             {
-                uint8_t senseDat[18];
-                usbhost_scsi_requestSense(senseDat);
-                uint8_t senseKey = senseDat[2] & 0x0f;
-                uint8_t asc = senseDat[12];
-                uint8_t ascq = senseDat[13];
-                printf("Eject fail, sense key:%02x, asc:%02x%02x\n", senseKey, asc, ascq);
+                ESP_LOGI("cdplayer_task_playControl", "Eject disc");
+                cdplayer_playerInfo.playing = 0;
+                esp_err_t err = usbhost_scsi_startStopUnit(true, false);
+                if (err != ESP_OK)
+                {
+                    uint8_t senseDat[18];
+                    usbhost_scsi_requestSense(senseDat);
+                    uint8_t senseKey = senseDat[2] & 0x0f;
+                    uint8_t asc = senseDat[12];
+                    uint8_t ascq = senseDat[13];
+                    printf("Eject fail, sense key:%02x, asc:%02x%02x\n", senseKey, asc, ascq);
+                }
             }
         }
 
@@ -689,20 +692,26 @@ void cdplayer_task_playControl(void *arg)
         // fast forward, fast backward
         if (btn_getLongPress(BTN_NEXT, 0))
         {
-            cdplayer_playerInfo.fastForwarding = 1;
-            cdplayer_playerInfo.readFrameCount += 5;
-            if (cdplayer_playerInfo.readFrameCount > cdplayer_driveInfo.trackList[cdplayer_playerInfo.playingTrackIndex].trackDuration)
+            if (cdplayer_driveInfo.readyToPlay == 1)
             {
-                cdplayer_playerInfo.readFrameCount = cdplayer_driveInfo.trackList[cdplayer_playerInfo.playingTrackIndex].trackDuration;
+                cdplayer_playerInfo.fastForwarding = 1;
+                cdplayer_playerInfo.readFrameCount += 5;
+                if (cdplayer_playerInfo.readFrameCount > cdplayer_driveInfo.trackList[cdplayer_playerInfo.playingTrackIndex].trackDuration)
+                {
+                    cdplayer_playerInfo.readFrameCount = cdplayer_driveInfo.trackList[cdplayer_playerInfo.playingTrackIndex].trackDuration;
+                }
             }
         }
         else if (btn_getLongPress(BTN_PREVIOUS, 0))
         {
-            cdplayer_playerInfo.fastBackwarding = 1;
-            cdplayer_playerInfo.readFrameCount -= 5;
-            if (cdplayer_playerInfo.readFrameCount <= 0)
+            if (cdplayer_driveInfo.readyToPlay == 1)
             {
-                cdplayer_playerInfo.readFrameCount = 0;
+                cdplayer_playerInfo.fastBackwarding = 1;
+                cdplayer_playerInfo.readFrameCount -= 5;
+                if (cdplayer_playerInfo.readFrameCount <= 0)
+                {
+                    cdplayer_playerInfo.readFrameCount = 0;
+                }
             }
         }
 
@@ -716,11 +725,14 @@ void cdplayer_task_playControl(void *arg)
             }
             else
             {
-                cdplayer_playerInfo.readFrameCount = 0;
-                cdplayer_playerInfo.playingTrackIndex++;
-                if (cdplayer_playerInfo.playingTrackIndex >= cdplayer_driveInfo.trackCount)
-                    cdplayer_playerInfo.playingTrackIndex = 0;
-                ESP_LOGI("cdplayer_task_playControl", "Next, play: %d", cdplayer_playerInfo.playingTrackIndex);
+                if (cdplayer_driveInfo.readyToPlay == 1)
+                {
+                    cdplayer_playerInfo.readFrameCount = 0;
+                    cdplayer_playerInfo.playingTrackIndex++;
+                    if (cdplayer_playerInfo.playingTrackIndex >= cdplayer_driveInfo.trackCount)
+                        cdplayer_playerInfo.playingTrackIndex = 0;
+                    ESP_LOGI("cdplayer_task_playControl", "Next, track: %d", cdplayer_playerInfo.playingTrackIndex);
+                }
             }
         }
         else if (btn_getPosedge(BTN_PREVIOUS))
@@ -731,11 +743,14 @@ void cdplayer_task_playControl(void *arg)
             }
             else
             {
-                cdplayer_playerInfo.readFrameCount = 0;
-                cdplayer_playerInfo.playingTrackIndex--;
-                if (cdplayer_playerInfo.playingTrackIndex < 0)
-                    cdplayer_playerInfo.playingTrackIndex = cdplayer_driveInfo.trackCount - 1;
-                ESP_LOGI("cdplayer_task_playControl", "Pervious, play: %d", cdplayer_playerInfo.playingTrackIndex);
+                if (cdplayer_driveInfo.readyToPlay == 1)
+                {
+                    cdplayer_playerInfo.readFrameCount = 0;
+                    cdplayer_playerInfo.playingTrackIndex--;
+                    if (cdplayer_playerInfo.playingTrackIndex < 0)
+                        cdplayer_playerInfo.playingTrackIndex = cdplayer_driveInfo.trackCount - 1;
+                    ESP_LOGI("cdplayer_task_playControl", "Pervious, play: %d", cdplayer_playerInfo.playingTrackIndex);
+                }
             }
         }
 
